@@ -27,6 +27,8 @@ LANG=C
 PATH=/bin:/sbin:/usr/bin:/usr/sbin
 export LC_ALL LANG PATH
 
+SENDUA=/usr/libexec/heartbeat/send_ua
+
 # Grab nfs lock tricks if available
 export NFS_TRICKS=1
 if [ -f "$(dirname $0)/svclib_nfslock" ]; then
@@ -627,29 +629,37 @@ ipv6()
 			ocf_log info "Removing IPv6 address $addr from $dev"
                 fi
 		
-		if [ "$1" = "add" ]; then
-			ocf_log debug "Pinging addr ${addr%%/*} from dev $dev"
-			if ping_check inet6 ${addr%%/*} $dev; then
-				ocf_log err "IPv6 address collision ${addr%%/*}"
-				return 1
-			fi
-		fi
 		/sbin/ip -f inet6 addr $1 dev $dev $addr
 		[ $? -ne 0 ] && return 1
+
+		# Duplicate Address Detection [DAD]
+		# Kernel will flag the IP as 'tentative' until it ensured that
+		# there is no duplicates.
+		# if there is, it will flag it as 'dadfailed'
+		if [ "$1" = "add" ]; then
+			for i in {1..10}; do
+				ipstatus=$(/sbin/ip -o -f inet6 addr show dev $dev to $addr)
+				if [[ $ipstatus == *dadfailed* ]]; then
+					ocf_log err "IPv6 address collision ${addr%%/*} [DAD]"
+					ip -f inet6 addr del dev $dev $addr
+					return 1
+				elif [[ $ipstatus != *tentative* ]]; then
+					break
+				elif [[ $i -eq 10 ]]; then
+					ofc_log warn "IPv6 address : DAD is still in tentative"
+				fi
+				sleep 0.5
+			done
+			# now the address should be useable
+                        # Try to send Unsolicited Neighbor Advertisements if send_ua is available
+			if [ -x $SENDUA ]; then
+				ARGS="-i 200 -c 5 ${addr%%/*} $maskbits $dev"
+				ocf_log info "$SENDUA $ARGS"
+				$SENDUA $ARGS || ocf_log err "Could not send ICMPv6 Unsolicited Neighbor Advertisements."
+			fi
+
+		fi
 		
-		#
-		# NDP should take of figuring out our new address.  Plus,
-		# we do not have something (like arping) to do this for ipv6
-		# anyway.
-		# 
-		# RFC 2461, section 7.2.6 states thusly:
-		#
-	   	# Note that because unsolicited Neighbor Advertisements do not
-		# reliably update caches in all nodes (the advertisements might
-		# not be received by all nodes), they should only be viewed as
-		# a performance optimization to quickly update the caches in
-		#  most neighbors. 
-		#
 		
 		# Not sure if this is necessary for ipv6 either.
 		file=$(which rdisc 2>/dev/null)
