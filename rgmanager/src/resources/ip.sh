@@ -641,7 +641,9 @@ ipv6()
 				ipstatus=$(/sbin/ip -o -f inet6 addr show dev $dev to $addr)
 				if [[ $ipstatus == *dadfailed* ]]; then
 					ocf_log err "IPv6 address collision ${addr%%/*} [DAD]"
-					ip -f inet6 addr del dev $dev $addr
+					if ip -f inet6 addr del dev $dev $addr; then
+						ocf_log err "Could not delete IPv6 address"
+					fi
 					return 1
 				elif [[ $ipstatus != *tentative* ]]; then
 					break
@@ -650,14 +652,13 @@ ipv6()
 				fi
 				sleep 0.5
 			done
-			# now the address should be useable
+			# Now the address should be useable
                         # Try to send Unsolicited Neighbor Advertisements if send_ua is available
 			if [ -x $SENDUA ]; then
 				ARGS="-i 200 -c 5 ${addr%%/*} $maskbits $dev"
 				ocf_log info "$SENDUA $ARGS"
 				$SENDUA $ARGS || ocf_log err "Could not send ICMPv6 Unsolicited Neighbor Advertisements."
 			fi
-
 		fi
 		
 		
