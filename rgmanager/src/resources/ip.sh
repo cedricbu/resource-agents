@@ -641,7 +641,8 @@ ipv6()
 				ipstatus=$(/sbin/ip -o -f inet6 addr show dev $dev to $addr)
 				if [[ $ipstatus == *dadfailed* ]]; then
 					ocf_log err "IPv6 address collision ${addr%%/*} [DAD]"
-					if ip -f inet6 addr del dev $dev $addr; then
+					ip -f inet6 addr del dev $dev $addr
+					if [[ $? -ne 0 ]]; then
 						ocf_log err "Could not delete IPv6 address"
 					fi
 					return 1
